@@ -8,8 +8,7 @@ st.set_page_config(page_title="Daily Work Report", layout="centered")
 
 # ---------------- CONFIG ----------------
 # 🔴 PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
-WEBHOOK_URL = "PASTE_YOUR_WEB_APP_URL_HERE"
-
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzgB9ZsV8udVEFjc0c6CtdI6kLkZ8LO4BDkd9iLHAdZE6WmSVXSKLAuKR1GzMQ5T1woKQ/exec"
 # ---------------- LOGIN ----------------
 if "username" not in st.session_state:
     st.session_state.username = ""
@@ -67,3 +66,4 @@ st.markdown("---")
 if st.button("🚪 Logout"):
     st.session_state.username = ""
     st.rerun()
+
