@@ -1,38 +1,16 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
+import requests
 from datetime import date
 
-# --------------------------------------------------
-# PAGE CONFIG
-# --------------------------------------------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="Daily Work Report", layout="centered")
 
-# --------------------------------------------------
-# GOOGLE AUTH (SERVICE ACCOUNT)
-# --------------------------------------------------
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+# ---------------- CONFIG ----------------
+# 🔴 PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
+WEBHOOK_URL = "PASTE_YOUR_WEB_APP_URL_HERE"
 
-creds = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=SCOPES
-)
-
-client = gspread.authorize(creds)
-
-# --------------------------------------------------
-# OPEN GOOGLE SHEET (YOUR EXISTING EXCEL)
-# --------------------------------------------------
-SHEET_NAME = "Work Report Master"   # 🔴 change if needed
-sheet = client.open(SHEET_NAME)
-
-# --------------------------------------------------
-# SIMPLE LOGIN
-# --------------------------------------------------
+# ---------------- LOGIN ----------------
 if "username" not in st.session_state:
     st.session_state.username = ""
 
@@ -53,9 +31,7 @@ if not st.session_state.username:
 
 st.success(f"Logged in as **{st.session_state.username}**")
 
-# --------------------------------------------------
-# DATA ENTRY
-# --------------------------------------------------
+# ---------------- DATA ENTRY ----------------
 st.subheader("📝 Daily Work Entry")
 
 with st.form("entry_form"):
@@ -63,61 +39,30 @@ with st.form("entry_form"):
     school = st.text_input("School")
     work_done = st.text_area("Work Done")
     amendment = st.text_area("Amendment (if any)")
-    distance = st.number_input("Distance from Zonal Office (KM)", 0.0, step=0.1)
+    distance = st.number_input("Distance (KM)", 0.0, step=0.1)
     save = st.form_submit_button("💾 Save")
 
 if save:
-    month_tab = work_date.strftime("%Y-%m")
+    payload = {
+        "date": work_date.strftime("%Y-%m-%d"),
+        "month": work_date.strftime("%Y-%m"),
+        "username": st.session_state.username,
+        "school": school,
+        "work_done": work_done,
+        "amendment": amendment,
+        "distance": distance
+    }
 
-    # Get or create month worksheet
     try:
-        ws = sheet.worksheet(month_tab)
-    except:
-        ws = sheet.add_worksheet(title=month_tab, rows=1000, cols=10)
-        ws.append_row([
-            "Date",
-            "Username",
-            "School",
-            "Work Done",
-            "Amendment",
-            "Distance (KM)"
-        ])
+        r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if r.status_code == 200:
+            st.success("✅ Data saved to Google Sheet")
+        else:
+            st.error("❌ Failed to save data")
+    except Exception as e:
+        st.error("❌ Connection error")
 
-    ws.append_row([
-        work_date.strftime("%Y-%m-%d"),
-        st.session_state.username,
-        school,
-        work_done,
-        amendment,
-        distance
-    ])
-
-    st.success("✅ Data saved to Google Sheet")
-
-# --------------------------------------------------
-# PREVIEW CURRENT MONTH (READ ONLY)
-# --------------------------------------------------
-st.markdown("---")
-st.subheader("📊 Current Month Preview")
-
-current_month = date.today().strftime("%Y-%m")
-
-try:
-    ws = sheet.worksheet(current_month)
-    records = ws.get_all_records()
-
-    if records:
-        df = pd.DataFrame(records)
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("No records yet for this month")
-
-except:
-    st.info("No sheet created for this month yet")
-
-# --------------------------------------------------
-# LOGOUT
-# --------------------------------------------------
+# ---------------- LOGOUT ----------------
 st.markdown("---")
 if st.button("🚪 Logout"):
     st.session_state.username = ""
