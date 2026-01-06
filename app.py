@@ -1,85 +1,93 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
-import os
+import requests
 import hashlib
+from datetime import date
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="Monthly Work Report", layout="centered")
 
-DATA_DIR = "data"
-USERS_FILE = "users.csv"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
-os.makedirs(DATA_DIR, exist_ok=True)
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
 
-# ---------------- USER DB ----------------
-if not os.path.exists(USERS_FILE):
-    pd.DataFrame(columns=["username", "password"]).to_csv(USERS_FILE, index=False)
+USERS_URL = f"{SUPABASE_URL}/rest/v1/users"
+REPORTS_URL = f"{SUPABASE_URL}/rest/v1/work_reports"
 
-users_df = pd.read_csv(USERS_FILE)
-
-def hash_password(pwd):
-    return hashlib.sha256(pwd.encode()).hexdigest()
+# ---------------- HELPERS ----------------
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # ---------------- SESSION ----------------
 if "user" not in st.session_state:
-    st.session_state.user = ""
+    st.session_state.user = None
 
 # ---------------- LOGIN / SIGNUP ----------------
 st.title("📘 Daily Work Report System")
 
 if not st.session_state.user:
-    tab1, tab2 = st.tabs(["Login", "Signup"])
+    tab_login, tab_signup = st.tabs(["Login", "Signup"])
 
     # ---------- LOGIN ----------
-    with tab1:
+    with tab_login:
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
 
         if st.button("Login"):
-            hashed = hash_password(password)
-            match = users_df[
-                (users_df["username"] == username) &
-                (users_df["password"] == hashed)
-            ]
-
-            if not match.empty:
-                st.session_state.user = username
-                st.rerun()
+            if not username or not password:
+                st.warning("Enter username and password")
             else:
-                st.error("Invalid username or password")
+                params = {
+                    "username": f"eq.{username}",
+                    "select": "*"
+                }
+                r = requests.get(USERS_URL, headers=HEADERS, params=params)
+
+                if r.status_code == 200 and r.json():
+                    user = r.json()[0]
+                    if user["password_hash"] == hash_password(password):
+                        st.session_state.user = username
+                        st.success("Login successful")
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password")
+                else:
+                    st.error("Invalid username or password")
 
     # ---------- SIGNUP ----------
-    with tab2:
+    with tab_signup:
         new_user = st.text_input("Choose Username")
         new_pass = st.text_input("Choose Password", type="password")
 
         if st.button("Create Account"):
-            if new_user in users_df["username"].values:
-                st.error("Username already exists")
-            elif not new_user or not new_pass:
+            if not new_user or not new_pass:
                 st.warning("Fill all fields")
             else:
-                users_df.loc[len(users_df)] = [
-                    new_user,
-                    hash_password(new_pass)
-                ]
-                users_df.to_csv(USERS_FILE, index=False)
-                os.makedirs(f"{DATA_DIR}/{new_user}", exist_ok=True)
-                st.success("Account created. Please login.")
+                payload = {
+                    "username": new_user,
+                    "password_hash": hash_password(new_pass)
+                }
+                r = requests.post(USERS_URL, headers=HEADERS, json=payload)
+
+                if r.status_code in (200, 201):
+                    st.success("Account created. Please login.")
+                else:
+                    st.error("Username already exists")
 
     st.stop()
 
 # ---------------- MAIN APP ----------------
 st.success(f"Logged in as **{st.session_state.user}**")
 
-user_dir = f"{DATA_DIR}/{st.session_state.user}"
-os.makedirs(user_dir, exist_ok=True)
-
 # ---------------- DATA ENTRY ----------------
 st.subheader("📝 Daily Entry")
 
-with st.form("entry"):
+with st.form("entry_form"):
     work_date = st.date_input("Date", date.today())
     school = st.text_input("School")
     work_done = st.text_area("Work Done")
@@ -88,53 +96,55 @@ with st.form("entry"):
     save = st.form_submit_button("Save")
 
 if save:
-    month = work_date.strftime("%Y-%m")
-    file_path = f"{user_dir}/{month}.csv"
+    payload = {
+        "username": st.session_state.user,
+        "work_date": str(work_date),
+        "month": work_date.strftime("%Y-%m"),
+        "school": school,
+        "work_done": work_done,
+        "amendment": amendment,
+        "distance": distance
+    }
 
-    new_row = pd.DataFrame([{
-        "Date": work_date.strftime("%Y-%m-%d"),
-        "School": school,
-        "Work Done": work_done,
-        "Amendment": amendment,
-        "Distance (KM)": distance
-    }])
+    r = requests.post(REPORTS_URL, headers=HEADERS, json=payload)
 
-    if os.path.exists(file_path):
-        df = pd.read_csv(file_path)
-        df = pd.concat([df, new_row], ignore_index=True)
+    if r.status_code in (200, 201):
+        st.success("✅ Data saved online")
     else:
-        df = new_row
+        st.error("❌ Failed to save data")
 
-    df.to_csv(file_path, index=False)
-    st.success(f"Saved to {month} report")
-
-# ---------------- MONTHLY REPORTS ----------------
+# ---------------- MONTHLY REPORT ----------------
 st.markdown("---")
 st.subheader("📊 My Monthly Reports")
 
-files = sorted(
-    f.replace(".csv", "")
-    for f in os.listdir(user_dir)
-    if f.endswith(".csv")
-)
+params = {
+    "username": f"eq.{st.session_state.user}",
+    "select": "*"
+}
 
-if not files:
-    st.info("No reports yet")
-else:
-    month = st.selectbox("Select Month", files)
-    df = pd.read_csv(f"{user_dir}/{month}.csv")
+r = requests.get(REPORTS_URL, headers=HEADERS, params=params)
 
-    st.dataframe(df, use_container_width=True)
+if r.status_code == 200 and r.json():
+    df = pd.DataFrame(r.json())
+    df["work_date"] = pd.to_datetime(df["work_date"])
+    months = sorted(df["month"].unique())
+
+    month = st.selectbox("Select Month", months)
+    month_df = df[df["month"] == month]
+
+    st.dataframe(month_df, use_container_width=True)
 
     st.download_button(
         "📥 Download Spreadsheet",
-        data=df.to_csv(index=False),
+        data=month_df.to_csv(index=False),
         file_name=f"{month}_work_report.csv",
         mime="text/csv"
     )
+else:
+    st.info("No records found")
 
 # ---------------- LOGOUT ----------------
 st.markdown("---")
 if st.button("Logout"):
-    st.session_state.user = ""
+    st.session_state.user = None
     st.rerun()
