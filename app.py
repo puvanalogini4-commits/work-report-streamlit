@@ -135,11 +135,12 @@ if r.status_code == 200 and r.json():
     st.dataframe(month_df, use_container_width=True)
 
     st.download_button(
-        "📥 Download Spreadsheet",
-        data=month_df.to_csv(index=False),
-        file_name=f"{month}_work_report.csv",
-        mime="text/csv"
-    )
+    "📥 Download Spreadsheet",
+    data=month_df.to_csv(index=False, encoding="utf-8-sig"),
+    file_name=f"{month}_work_report.csv",
+    mime="text/csv"
+)
+
 else:
     st.info("No records found")
 
@@ -148,3 +149,4 @@ st.markdown("---")
 if st.button("Logout"):
     st.session_state.user = None
     st.rerun()
+
